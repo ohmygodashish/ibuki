@@ -1,0 +1,16 @@
+{
+  "latitude": 35.6895,
+  "longitude": 139.6917,
+  "timezone": "Asia/Tokyo",
+  "current": {
+    "time": "2026-06-08T14:30",
+    "interval": 3600,
+    "us_aqi": 45,
+    "european_aqi": 38,
+    "pm2_5": 12.3,
+    "pm10": 25.1,
+    "ozone": 68.0,
+    "nitrogen_dioxide": 18.5,
+    "carbon_monoxide": 250.0
+  }
+}

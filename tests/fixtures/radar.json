@@ -1,0 +1,18 @@
+{
+  "latitude": 35.6895,
+  "longitude": 139.6917,
+  "timezone": "Asia/Tokyo",
+  "current": {
+    "time": "2026-06-08T14:30",
+    "interval": 900,
+    "precipitation": 0.5,
+    "rain": 0.3,
+    "showers": 0.2,
+    "snowfall": 0.0,
+    "weather_code": 61
+  },
+  "hourly": {
+    "time": ["2026-06-08T14:00", "2026-06-08T15:00"],
+    "precipitation": [0.5, 1.2]
+  }
+}
