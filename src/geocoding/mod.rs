@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, check_status, map_reqwest_error};
 use crate::models::Location;
 
 const GEOCODING_URL: &str = "https://geocoding-api.open-meteo.com/v1/search";
@@ -54,16 +54,7 @@ impl GeocodingClient {
             .send()
             .map_err(map_reqwest_error)?;
 
-        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(AppError::RateLimited);
-        }
-
-        if !response.status().is_success() {
-            return Err(AppError::Api(format!(
-                "Geocoding API returned status {}",
-                response.status()
-            )));
-        }
+        check_status(&response, "Geocoding")?;
 
         let body: GeocodingResponse = response.json().map_err(AppError::Parse)?;
 
@@ -78,13 +69,5 @@ impl GeocodingClient {
             latitude: result.latitude,
             longitude: result.longitude,
         })
-    }
-}
-
-fn map_reqwest_error(err: reqwest::Error) -> AppError {
-    if err.is_timeout() {
-        AppError::Timeout
-    } else {
-        AppError::Network(err)
     }
 }

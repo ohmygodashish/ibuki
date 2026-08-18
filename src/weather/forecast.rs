@@ -1,7 +1,6 @@
 use serde::Deserialize;
 
-use super::{check_status, map_reqwest_error};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, check_status, map_reqwest_error};
 use crate::models::{ForecastDay, Location};
 use crate::units::weather_description;
 
@@ -43,7 +42,7 @@ pub fn fetch_forecast(
         .send()
         .map_err(map_reqwest_error)?;
 
-    check_status(&response)?;
+    check_status(&response, "Weather")?;
 
     let body: ApiResponse = response.json().map_err(AppError::Parse)?;
     let daily = body.daily.ok_or(AppError::EmptyData)?;
@@ -59,21 +58,25 @@ pub fn fetch_forecast(
     let wind = daily.wind_speed_10m_max.unwrap_or_default();
     let codes = daily.weather_code.unwrap_or_default();
 
+    let at = |col: &[Option<f64>], i: usize| col.get(i).copied().flatten();
+
     let forecast = daily
         .time
         .into_iter()
         .enumerate()
         .map(|(i, date)| {
-            let weather_code = codes.get(i).and_then(|v| *v).unwrap_or(0);
+            let weather_code = codes.get(i).copied().flatten();
             ForecastDay {
                 date,
-                temperature_max_c: max_temps.get(i).and_then(|v| *v).unwrap_or(0.0),
-                temperature_min_c: min_temps.get(i).and_then(|v| *v).unwrap_or(0.0),
-                precipitation_sum_mm: precip.get(i).and_then(|v| *v).unwrap_or(0.0),
-                precipitation_probability_percent: precip_prob.get(i).and_then(|v| *v).unwrap_or(0),
-                wind_speed_max_kmh: wind.get(i).and_then(|v| *v).unwrap_or(0.0),
+                temperature_max_c: at(&max_temps, i),
+                temperature_min_c: at(&min_temps, i),
+                precipitation_sum_mm: at(&precip, i),
+                precipitation_probability_percent: precip_prob.get(i).copied().flatten(),
+                wind_speed_max_kmh: at(&wind, i),
                 weather_code,
-                weather_description: weather_description(weather_code).to_string(),
+                weather_description: weather_code
+                    .map_or("Unknown", weather_description)
+                    .to_string(),
             }
         })
         .collect();

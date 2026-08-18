@@ -1,7 +1,6 @@
 use serde::Deserialize;
 
-use super::{check_status, map_reqwest_error};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, check_status, map_reqwest_error};
 use crate::models::{Location, RadarMetrics};
 use crate::units::weather_description;
 
@@ -46,31 +45,36 @@ pub fn fetch_radar(
         .send()
         .map_err(map_reqwest_error)?;
 
-    check_status(&response)?;
+    check_status(&response, "Weather")?;
 
     let body: ApiResponse = response.json().map_err(AppError::Parse)?;
     let current = body.current.ok_or(AppError::EmptyData)?;
 
-    let rain = current.rain.unwrap_or(0.0);
-    let snowfall = current.snowfall.unwrap_or(0.0);
-    let showers = current.showers.unwrap_or(0.0);
-    let precipitation = current.precipitation.unwrap_or(rain + showers);
-    let weather_code = current.weather_code.unwrap_or(0);
+    let weather_code = current.weather_code;
 
     // Next-hour forecast: second hourly precipitation value when available
     let next_hour = body
         .hourly
         .and_then(|h| h.precipitation)
-        .and_then(|vals| vals.get(1).copied().flatten())
-        .unwrap_or(0.0);
+        .and_then(|vals| vals.get(1).copied().flatten());
 
     Ok(RadarMetrics {
-        precipitation_last_hour_mm: precipitation,
+        precipitation_last_hour_mm: current
+            .precipitation
+            .or_else(|| sum_opt(current.rain, current.showers)),
         precipitation_forecast_next_hour_mm: next_hour,
-        rain_intensity_mm_h: rain,
-        snowfall_cm_h: snowfall,
-        showers_mm_h: showers,
+        rain_intensity_mm_h: current.rain,
+        snowfall_cm_h: current.snowfall,
+        showers_mm_h: current.showers,
         weather_code,
-        weather_description: weather_description(weather_code).to_string(),
+        weather_description: weather_code.map_or("Unknown", weather_description).to_string(),
     })
+}
+
+/// `None` only when both parts are missing — one known component still beats no answer.
+fn sum_opt(a: Option<f64>, b: Option<f64>) -> Option<f64> {
+    match (a, b) {
+        (None, None) => None,
+        _ => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
+    }
 }

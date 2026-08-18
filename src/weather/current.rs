@@ -1,13 +1,13 @@
 use serde::Deserialize;
 
-use super::{check_status, map_reqwest_error};
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, check_status, map_reqwest_error};
 use crate::models::{CurrentWeather, Location};
-use crate::units::{celsius_to_fahrenheit, weather_description};
+use crate::units::weather_description;
 
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
     current: Option<ApiCurrent>,
+    timezone_abbreviation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -41,35 +41,24 @@ pub fn fetch_current(
         .send()
         .map_err(map_reqwest_error)?;
 
-    check_status(&response)?;
+    check_status(&response, "Weather")?;
 
     let body: ApiResponse = response.json().map_err(AppError::Parse)?;
     let current = body.current.ok_or(AppError::EmptyData)?;
 
     let temperature_c = current.temperature_2m.ok_or(AppError::EmptyData)?;
-    let feels_like_c = current.apparent_temperature.unwrap_or(temperature_c);
-    let weather_code = current.weather_code.unwrap_or(0);
-    let timestamp = current
-        .time
-        .map(|t| {
-            if t.ends_with('Z') {
-                t
-            } else {
-                format!("{t}:00Z")
-            }
-        })
-        .unwrap_or_default();
+    let weather_code = current.weather_code;
 
     Ok(CurrentWeather {
         temperature_c,
-        temperature_f: celsius_to_fahrenheit(temperature_c),
-        feels_like_c,
-        feels_like_f: celsius_to_fahrenheit(feels_like_c),
-        humidity_percent: current.relative_humidity_2m.unwrap_or(0),
-        wind_speed_kmh: current.wind_speed_10m.unwrap_or(0.0),
-        wind_direction_deg: current.wind_direction_10m.unwrap_or(0.0),
+        feels_like_c: current.apparent_temperature.unwrap_or(temperature_c),
+        humidity_percent: current.relative_humidity_2m,
+        wind_speed_kmh: current.wind_speed_10m,
+        wind_direction_deg: current.wind_direction_10m,
         weather_code,
-        weather_description: weather_description(weather_code).to_string(),
-        timestamp,
+        weather_description: weather_code.map_or("Unknown", weather_description).to_string(),
+        // `timezone=auto` means this is local time at the location, not UTC.
+        timestamp: current.time.unwrap_or_default(),
+        timezone: body.timezone_abbreviation,
     })
 }

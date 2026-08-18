@@ -6,7 +6,7 @@ pub use current::fetch_current;
 pub use forecast::fetch_forecast;
 pub use radar::fetch_radar;
 
-use crate::error::{AppError, Result};
+use crate::error::Result;
 use crate::models::Location;
 
 const FORECAST_URL: &str = "https://api.open-meteo.com/v1/forecast";
@@ -45,25 +45,4 @@ impl WeatherClient {
     pub fn radar(&self, location: &Location) -> Result<crate::models::RadarMetrics> {
         fetch_radar(&self.http, &self.base_url, location)
     }
-}
-
-pub(crate) fn map_reqwest_error(err: reqwest::Error) -> AppError {
-    if err.is_timeout() {
-        AppError::Timeout
-    } else {
-        AppError::Network(err)
-    }
-}
-
-pub(crate) fn check_status(response: &reqwest::blocking::Response) -> Result<()> {
-    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-        return Err(AppError::RateLimited);
-    }
-    if !response.status().is_success() {
-        return Err(AppError::Api(format!(
-            "Weather API returned status {}",
-            response.status()
-        )));
-    }
-    Ok(())
 }

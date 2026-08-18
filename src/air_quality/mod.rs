@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-use crate::error::{AppError, Result};
+use crate::error::{AppError, Result, check_status, map_reqwest_error};
 use crate::models::{AirQuality, Location};
 
 const AIR_QUALITY_URL: &str = "https://air-quality-api.open-meteo.com/v1/air-quality";
@@ -8,6 +8,7 @@ const AIR_QUALITY_URL: &str = "https://air-quality-api.open-meteo.com/v1/air-qua
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
     current: Option<ApiCurrent>,
+    timezone_abbreviation: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,48 +59,22 @@ impl AirQualityClient {
             .send()
             .map_err(map_reqwest_error)?;
 
-        if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
-            return Err(AppError::RateLimited);
-        }
-
-        if !response.status().is_success() {
-            return Err(AppError::Api(format!(
-                "Air quality API returned status {}",
-                response.status()
-            )));
-        }
+        check_status(&response, "Air quality")?;
 
         let body: ApiResponse = response.json().map_err(AppError::Parse)?;
         let current = body.current.ok_or(AppError::EmptyData)?;
 
-        let timestamp = current
-            .time
-            .map(|t| {
-                if t.ends_with('Z') {
-                    t
-                } else {
-                    format!("{t}:00Z")
-                }
-            })
-            .unwrap_or_default();
-
         Ok(AirQuality {
-            aqi_us: current.us_aqi.unwrap_or(0),
-            aqi_eu: current.european_aqi.unwrap_or(0),
-            pm2_5_ug_m3: current.pm2_5.unwrap_or(0.0),
-            pm10_ug_m3: current.pm10.unwrap_or(0.0),
-            ozone_ug_m3: current.ozone.unwrap_or(0.0),
-            nitrogen_dioxide_ug_m3: current.nitrogen_dioxide.unwrap_or(0.0),
-            carbon_monoxide_ug_m3: current.carbon_monoxide.unwrap_or(0.0),
-            timestamp,
+            aqi_us: current.us_aqi,
+            aqi_eu: current.european_aqi,
+            pm2_5_ug_m3: current.pm2_5,
+            pm10_ug_m3: current.pm10,
+            ozone_ug_m3: current.ozone,
+            nitrogen_dioxide_ug_m3: current.nitrogen_dioxide,
+            carbon_monoxide_ug_m3: current.carbon_monoxide,
+            // `timezone=auto` means this is local time at the location, not UTC.
+            timestamp: current.time.unwrap_or_default(),
+            timezone: body.timezone_abbreviation,
         })
-    }
-}
-
-fn map_reqwest_error(err: reqwest::Error) -> AppError {
-    if err.is_timeout() {
-        AppError::Timeout
-    } else {
-        AppError::Network(err)
     }
 }
