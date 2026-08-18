@@ -107,10 +107,12 @@ fn weather_current_parses_fixture() {
     let current = client.current(&tokyo()).unwrap();
 
     assert!((current.temperature_c - 22.5).abs() < f64::EPSILON);
-    assert!((current.temperature_f - 72.5).abs() < f64::EPSILON);
-    assert_eq!(current.humidity_percent, 65);
-    assert_eq!(current.weather_code, 1);
+    assert_eq!(current.humidity_percent, Some(65));
+    assert_eq!(current.weather_code, Some(1));
     assert_eq!(current.weather_description, "Mainly clear");
+    // timezone=auto: the timestamp is local, so carry the API's own label.
+    assert_eq!(current.timezone.as_deref(), Some("JST"));
+    assert_eq!(current.timestamp, "2026-06-08T14:30");
 }
 
 #[test]
@@ -124,8 +126,8 @@ fn weather_forecast_parses_fixture() {
 
     assert_eq!(days.len(), 3);
     assert_eq!(days[0].date, "2026-06-08");
-    assert!((days[0].temperature_max_c - 28.0).abs() < f64::EPSILON);
-    assert_eq!(days[0].precipitation_probability_percent, 40);
+    assert_eq!(days[0].temperature_max_c, Some(28.0));
+    assert_eq!(days[0].precipitation_probability_percent, Some(40));
     assert_eq!(days[2].weather_description, "Slight rain");
 }
 
@@ -138,9 +140,9 @@ fn weather_radar_parses_fixture() {
     let client = WeatherClient::with_base_url(http(), format!("{}/v1/forecast", server.url()));
     let radar = client.radar(&tokyo()).unwrap();
 
-    assert!((radar.precipitation_last_hour_mm - 0.5).abs() < f64::EPSILON);
-    assert!((radar.precipitation_forecast_next_hour_mm - 1.2).abs() < f64::EPSILON);
-    assert!((radar.rain_intensity_mm_h - 0.3).abs() < f64::EPSILON);
+    assert_eq!(radar.precipitation_last_hour_mm, Some(0.5));
+    assert_eq!(radar.precipitation_forecast_next_hour_mm, Some(1.2));
+    assert_eq!(radar.rain_intensity_mm_h, Some(0.3));
     assert_eq!(radar.weather_description, "Slight rain");
 }
 
@@ -167,8 +169,28 @@ fn air_quality_parses_fixture() {
         AirQualityClient::with_base_url(http(), format!("{}/v1/air-quality", server.url()));
     let aq = client.current(&tokyo()).unwrap();
 
-    assert_eq!(aq.aqi_us, 45);
-    assert_eq!(aq.aqi_eu, 38);
-    assert!((aq.pm2_5_ug_m3 - 12.3).abs() < f64::EPSILON);
-    assert!((aq.carbon_monoxide_ug_m3 - 250.0).abs() < f64::EPSILON);
+    assert_eq!(aq.aqi_us, Some(45));
+    assert_eq!(aq.aqi_eu, Some(38));
+    assert_eq!(aq.pm2_5_ug_m3, Some(12.3));
+    assert_eq!(aq.carbon_monoxide_ug_m3, Some(250.0));
+    assert_eq!(aq.timezone.as_deref(), Some("JST"));
+}
+
+#[test]
+fn air_quality_missing_pollutants_stay_none() {
+    let mut server = mockito::Server::new();
+    let _mock = mock_get(
+        &mut server,
+        "/v1/air-quality",
+        r#"{"current": {"time": "2026-06-08T14:30", "us_aqi": 45}}"#,
+    );
+
+    let client =
+        AirQualityClient::with_base_url(http(), format!("{}/v1/air-quality", server.url()));
+    let aq = client.current(&tokyo()).unwrap();
+
+    assert_eq!(aq.aqi_us, Some(45));
+    // Absent readings must not be reported as clean air.
+    assert_eq!(aq.pm2_5_ug_m3, None);
+    assert_eq!(aq.aqi_eu, None);
 }

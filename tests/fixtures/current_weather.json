@@ -11,5 +11,6 @@
     "wind_speed_10m": 12.3,
     "wind_direction_10m": 180,
     "weather_code": 1
-  }
+  },
+  "timezone_abbreviation": "JST"
 }

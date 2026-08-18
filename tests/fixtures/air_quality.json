@@ -12,5 +12,6 @@
     "ozone": 68.0,
     "nitrogen_dioxide": 18.5,
     "carbon_monoxide": 250.0
-  }
+  },
+  "timezone_abbreviation": "JST"
 }

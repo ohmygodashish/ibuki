@@ -67,7 +67,9 @@ pub fn fetch_radar(
         snowfall_cm_h: current.snowfall,
         showers_mm_h: current.showers,
         weather_code,
-        weather_description: weather_code.map_or("Unknown", weather_description).to_string(),
+        weather_description: weather_code
+            .map_or("Unknown", weather_description)
+            .to_string(),
     })
 }
 

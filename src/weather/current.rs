@@ -56,7 +56,9 @@ pub fn fetch_current(
         wind_speed_kmh: current.wind_speed_10m,
         wind_direction_deg: current.wind_direction_10m,
         weather_code,
-        weather_description: weather_code.map_or("Unknown", weather_description).to_string(),
+        weather_description: weather_code
+            .map_or("Unknown", weather_description)
+            .to_string(),
         // `timezone=auto` means this is local time at the location, not UTC.
         timestamp: current.time.unwrap_or_default(),
         timezone: body.timezone_abbreviation,
