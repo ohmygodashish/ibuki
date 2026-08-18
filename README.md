@@ -38,8 +38,8 @@ ibuki <COMMAND> <CITY> [OPTIONS]
 
 | Flag | Description |
 |------|-------------|
-| `--json` | Machine-readable JSON output |
-| `--fahrenheit` | Temperatures in °F (default: °C) |
+| `--json` | Machine-readable JSON output (always metric) |
+| `--fahrenheit` | Temperatures in °F (default: °C); affects human output only |
 | `--days <N>` | Forecast length, 1–16 (forecast only) |
 | `-h, --help` | Help |
 | `-V, --version` | Version |
@@ -73,19 +73,24 @@ ibuki current "San Francisco"
 ### Sample output
 
 ```
-┌──────────────────────────────────────────┐
-│  Tokyo, Japan                            │
-│  Current Weather                         │
-├──────────────────────────────────────────┤
-│  Temperature:  22.5°C (feels 23.1°C)     │
-│  Conditions:   Mainly clear              │
-│  Humidity:     65%                       │
-│  Wind:         12.3 km/h (S)             │
-│  Updated:      2026-06-08 14:30 UTC      │
-└──────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│  Tokyo, Japan                              │
+│  Current Weather                           │
+│  ────────────────────────────────────────  │
+│  Temperature:  22.5°C (feels 23.1°C)       │
+│  Conditions:   Mainly clear                │
+│  Humidity:     65%                         │
+│  Wind:         12.3 km/h (S)               │
+│  Updated:      2026-06-08 14:30 GMT+9      │
+└────────────────────────────────────────────┘
 ```
 
-Use `--json` for scripts and tooling. Colors are enabled on TTY output and respect [`NO_COLOR`](https://no-color.org/).
+Timestamps are local to the queried location — the trailing label is the timezone
+Open-Meteo reports for it. Readings the API omits show as `n/a` rather than `0`.
+
+Use `--json` for scripts and tooling: it is a stable metric schema (°C, mm, km/h),
+with missing readings as `null`. Colors are enabled on TTY output and respect
+[`NO_COLOR`](https://no-color.org/).
 
 ## Data sources
 

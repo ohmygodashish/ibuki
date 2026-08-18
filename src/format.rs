@@ -36,10 +36,7 @@ pub fn current(data: &CurrentResponse, fahrenheit: bool) -> String {
             ("Conditions:", c.weather_description.clone()),
             ("Humidity:", int(c.humidity_percent, "%")),
             ("Wind:", wind),
-            (
-                "Updated:",
-                timestamp(&c.timestamp, c.timezone.as_deref()),
-            ),
+            ("Updated:", timestamp(&c.timestamp, c.timezone.as_deref())),
         ],
     )
 }
@@ -111,10 +108,7 @@ pub fn air_quality(data: &AirQualityResponse) -> String {
             ("Ozone:", dec(a.ozone_ug_m3, " µg/m³")),
             ("NO₂:", dec(a.nitrogen_dioxide_ug_m3, " µg/m³")),
             ("CO:", dec(a.carbon_monoxide_ug_m3, " µg/m³")),
-            (
-                "Updated:",
-                timestamp(&a.timestamp, a.timezone.as_deref()),
-            ),
+            ("Updated:", timestamp(&a.timestamp, a.timezone.as_deref())),
         ],
     )
 }
@@ -126,7 +120,11 @@ pub fn air_quality(data: &AirQualityResponse) -> String {
 /// right border. Add `unicode-width` if that matters.
 fn render(titles: &[String], rows: &[(&str, String)]) -> String {
     let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-    let label_w = rows.iter().map(|(l, _)| l.chars().count()).max().unwrap_or(0);
+    let label_w = rows
+        .iter()
+        .map(|(l, _)| l.chars().count())
+        .max()
+        .unwrap_or(0);
 
     let plain: Vec<String> = titles
         .iter()
