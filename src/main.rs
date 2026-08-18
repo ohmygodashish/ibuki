@@ -6,7 +6,7 @@ use clap::Parser;
 
 use ibuki::air_quality::AirQualityClient;
 use ibuki::cli::{Cli, Command};
-use ibuki::format::create_formatter;
+use ibuki::format;
 use ibuki::geocoding::GeocodingClient;
 use ibuki::models::{AirQualityResponse, CurrentResponse, ForecastResponse, RadarResponse};
 use ibuki::weather::WeatherClient;
@@ -32,31 +32,56 @@ fn run() -> anyhow::Result<()> {
     let air_quality = AirQualityClient::new(http);
 
     let location = geocoding.resolve(cli.command.city())?;
-    let formatter = create_formatter(cli.command.json());
-    let fahrenheit = cli.command.fahrenheit();
+    let json = cli.json;
+    let fahrenheit = cli.fahrenheit;
 
+    // JSON is always metric; --fahrenheit converts for human output only.
     let output = match &cli.command {
         Command::Current { .. } => {
             let current = weather.current(&location)?;
-            formatter.current(&CurrentResponse { location, current }, fahrenheit)
+            let data = CurrentResponse { location, current };
+            if json {
+                to_json(&data)?
+            } else {
+                format::current(&data, fahrenheit)
+            }
         }
         Command::Forecast { days, .. } => {
             let forecast = weather.forecast(&location, *days)?;
-            formatter.forecast(&ForecastResponse { location, forecast }, fahrenheit)
+            let data = ForecastResponse { location, forecast };
+            if json {
+                to_json(&data)?
+            } else {
+                format::forecast(&data, fahrenheit)
+            }
         }
         Command::Radar { .. } => {
             let radar = weather.radar(&location)?;
-            formatter.radar(&RadarResponse { location, radar })
+            let data = RadarResponse { location, radar };
+            if json {
+                to_json(&data)?
+            } else {
+                format::radar(&data)
+            }
         }
         Command::AirQuality { .. } => {
             let aq = air_quality.current(&location)?;
-            formatter.air_quality(&AirQualityResponse {
+            let data = AirQualityResponse {
                 location,
                 air_quality: aq,
-            })
+            };
+            if json {
+                to_json(&data)?
+            } else {
+                format::air_quality(&data)
+            }
         }
     };
 
     println!("{output}");
     Ok(())
+}
+
+fn to_json<T: serde::Serialize>(value: &T) -> anyhow::Result<String> {
+    serde_json::to_string_pretty(value).context("Failed to serialize response")
 }
