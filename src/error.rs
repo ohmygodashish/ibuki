@@ -25,3 +25,25 @@ pub enum AppError {
 }
 
 pub type Result<T> = std::result::Result<T, AppError>;
+
+pub fn map_reqwest_error(err: reqwest::Error) -> AppError {
+    if err.is_timeout() {
+        AppError::Timeout
+    } else {
+        AppError::Network(err)
+    }
+}
+
+/// `api` names the service in the error message, e.g. "Geocoding".
+pub fn check_status(response: &reqwest::blocking::Response, api: &str) -> Result<()> {
+    if response.status() == reqwest::StatusCode::TOO_MANY_REQUESTS {
+        return Err(AppError::RateLimited);
+    }
+    if !response.status().is_success() {
+        return Err(AppError::Api(format!(
+            "{api} API returned status {}",
+            response.status()
+        )));
+    }
+    Ok(())
+}
