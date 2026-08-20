@@ -41,6 +41,8 @@ ibuki <COMMAND> <CITY> [OPTIONS]
 | `--json` | Machine-readable JSON output (always metric) |
 | `--fahrenheit` | Temperatures in °F (default: °C); affects human output only |
 | `--days <N>` | Forecast length, 1–16 (forecast only) |
+| `--lat <LAT>` | Latitude (−90..90); skips the city lookup, requires `--lon` |
+| `--lon <LON>` | Longitude (−180..180); skips the city lookup, requires `--lat` |
 | `-h, --help` | Help |
 | `-V, --version` | Version |
 
@@ -58,6 +60,13 @@ ibuki radar "New York" --json
 
 # Air quality
 ibuki air-quality Paris
+
+# Skip the city lookup and name a point directly
+ibuki current --lat 45.5234 --lon -122.6762
+
+# Set a home city once, then omit it
+export IBUKI_CITY=Tokyo
+ibuki current
 
 # Help
 ibuki --help
@@ -93,6 +102,19 @@ Open-Meteo reports for it. Readings the API omits show as `n/a` rather than `0`.
 Use `--json` for scripts and tooling: it is a stable metric schema (°C, mm, km/h),
 with missing readings as `null`. Colors are enabled on TTY output and respect
 [`NO_COLOR`](https://no-color.org/).
+
+## Environment
+
+| Variable | Effect |
+|----------|--------|
+| `IBUKI_CITY` | Default city when no name is given; an explicit argument wins |
+| `NO_COLOR` | Disable colored output |
+
+Resolved coordinates are cached at `$XDG_CACHE_HOME/ibuki/geocoding.json`
+(`~/.cache/ibuki/geocoding.json` by default, `%LOCALAPPDATA%` on Windows), which skips
+the city lookup on repeat runs. Cities do not move, so nothing expires. The file holds
+only the names you looked up and their public coordinates, is never transmitted, and is
+safe to delete — a missing or corrupt cache just means one extra request.
 
 ## Data sources
 
