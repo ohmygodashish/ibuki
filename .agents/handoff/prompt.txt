@@ -1,0 +1,1 @@
+I am continuing work from a previous session. Please read the handoff document at .agents/handoff/ibuki-cli-hardening-handoff.md and invoke the recommended skills before taking action. Our goal for this session is: implement the deferred Section C items — starting with C4 (surface error cause chains in main.rs).
