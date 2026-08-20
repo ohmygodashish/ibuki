@@ -169,7 +169,13 @@ fn render(titles: &[String], rows: &[(&str, String)]) -> String {
 }
 
 fn header(location: &crate::models::Location) -> String {
-    format!("{}, {}", location.name, location.country)
+    match &location.admin1 {
+        // Tokyo's admin1 is "Tokyo"; repeating it adds nothing.
+        Some(region) if *region != location.name => {
+            format!("{}, {region}, {}", location.name, location.country)
+        }
+        _ => format!("{}, {}", location.name, location.country),
+    }
 }
 
 fn dec(value: Option<f64>, unit: &str) -> String {

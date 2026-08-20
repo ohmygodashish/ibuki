@@ -13,6 +13,7 @@ struct GeocodingResponse {
 #[derive(Debug, Deserialize)]
 struct GeocodingResult {
     name: String,
+    admin1: Option<String>,
     country: Option<String>,
     latitude: f64,
     longitude: f64,
@@ -65,6 +66,7 @@ impl GeocodingClient {
 
         Ok(Location {
             name: result.name,
+            admin1: result.admin1,
             country: result.country.unwrap_or_else(|| "Unknown".to_string()),
             latitude: result.latitude,
             longitude: result.longitude,

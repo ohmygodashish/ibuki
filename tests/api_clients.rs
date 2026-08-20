@@ -26,6 +26,7 @@ fn http() -> reqwest::blocking::Client {
 fn tokyo() -> Location {
     Location {
         name: "Tokyo".into(),
+        admin1: Some("Tokyo".into()),
         country: "Japan".into(),
         latitude: 35.6895,
         longitude: 139.6917,
@@ -52,6 +53,7 @@ fn geocoding_resolves_city() {
     let location = client.resolve("Tokyo").unwrap();
 
     assert_eq!(location.name, "Tokyo");
+    assert_eq!(location.admin1.as_deref(), Some("Tokyo"));
     assert_eq!(location.country, "Japan");
     assert!((location.latitude - 35.6895).abs() < 0.001);
     mock.assert();

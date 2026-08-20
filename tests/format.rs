@@ -7,6 +7,7 @@ use ibuki::models::{
 fn tokyo() -> Location {
     Location {
         name: "Tokyo".into(),
+        admin1: Some("Tokyo".into()),
         country: "Japan".into(),
         latitude: 35.6895,
         longitude: 139.6917,
@@ -176,4 +177,30 @@ fn json_radar_and_air_quality() {
         json_of(&sample_air_quality(true))["air_quality"]["aqi_us"],
         45
     );
+}
+
+fn portland() -> Location {
+    Location {
+        name: "Portland".into(),
+        admin1: Some("Oregon".into()),
+        country: "United States".into(),
+        latitude: 45.5234,
+        longitude: -122.6762,
+    }
+}
+
+#[test]
+fn header_shows_admin1_to_disambiguate_cities() {
+    let data = CurrentResponse {
+        location: portland(),
+        ..sample_current()
+    };
+    assert!(format::current(&data, false).contains("Portland, Oregon, United States"));
+}
+
+#[test]
+fn header_omits_admin1_when_it_repeats_the_city_name() {
+    let out = format::current(&sample_current(), false);
+    assert!(out.contains("Tokyo, Japan"));
+    assert!(!out.contains("Tokyo, Tokyo"));
 }

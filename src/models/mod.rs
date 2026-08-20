@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Location {
     pub name: String,
+    /// First-level region ("Oregon"), which is what separates the Portlands.
+    pub admin1: Option<String>,
     pub country: String,
     pub latitude: f64,
     pub longitude: f64,

@@ -144,3 +144,18 @@ fn air_quality_mocked_json() {
         .stdout(predicate::str::contains("\"aqi_us\": 45"))
         .stdout(predicate::str::contains("\"pm2_5_ug_m3\": 12.3"));
 }
+
+#[test]
+fn error_output_includes_underlying_cause() {
+    let mut geo = mockito::Server::new();
+    let _geo_mock = mock_json(&mut geo, "/v1/search", "{ not json");
+
+    let mut cmd = Command::cargo_bin("ibuki").unwrap();
+    cmd.env("IBUKI_GEOCODING_URL", format!("{}/v1/search", geo.url()))
+        .args(["current", "Tokyo"])
+        .assert()
+        .failure()
+        .code(1)
+        .stderr(predicate::str::contains("Failed to parse API response"))
+        .stderr(predicate::str::contains("error decoding response body"));
+}
