@@ -279,11 +279,12 @@ reported, and is `null` when the API omits it.
     `GMT+9`; assertions on a specific abbreviation MUST use the fixtures
 
 - **CI/CD Integration**:
-  - Run `cargo test` on every PR via GitHub Actions
-  - Run `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` for code quality
-  - Enforce the NFR-002 binary size budget on the release build
-  - **Known gap**: CI currently runs on `ubuntu-latest` only, so NFR-003 and PLT-002
-    (macOS, Windows) are stated but unverified
+  - Run `cargo test` on every PR via GitHub Actions, across a Linux, macOS and Windows
+    matrix with `fail-fast: false` so every platform reports independently (NFR-003, PLT-002)
+  - Run `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` for code quality;
+    both are platform-independent and run on Linux only
+  - Enforce the NFR-002 binary size budget on the release build, on Linux only —
+    `stat -c%s` is GNU-specific and the artifact is `ibuki.exe` on Windows
 
 - **Coverage Requirements**:
   - Minimum 80% code coverage for core logic
@@ -405,7 +406,7 @@ differs shows all three parts: `Portland, Oregon, United States`.
 - [ ] `--days` flag works within valid range (1-16)
 - [ ] Invalid city names produce clear error messages
 - [ ] Network errors are handled gracefully
-- [ ] Binary compiles and runs on Linux, macOS, and Windows (CI verifies Linux only)
+- [ ] Binary compiles and runs on Linux, macOS, and Windows (verified by the CI matrix)
 - [ ] `cargo test` passes with minimum 80% coverage
 - [ ] `cargo clippy` produces no warnings
 - [ ] `cargo fmt --check` passes
@@ -417,7 +418,7 @@ differs shows all three parts: `Portland, Oregon, United States`.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-06-08 | Initial specification |
-| 1.1 | 2026-08-20 | Reconciled with the implementation. Timestamps corrected from UTC to location-local with an API-reported abbreviation (REQ-014); JSON declared metric-only and the `temperature_f`/`feels_like_f` twins dropped from the schema (REQ-009); omitted readings defined as `null`/`n/a` rather than `0` (REQ-013); `admin1` added to `Location` and the header (REQ-015); error output now carries its cause (ERR-005). PAT-001/PAT-002 rewritten — the formatter trait and factory were removed in favour of free functions and base-URL injection. Test strategy corrected to the frameworks actually in use, with the ubuntu-only CI and unmeasured coverage recorded as known gaps. |
+| 1.1 | 2026-08-20 | Reconciled with the implementation. Timestamps corrected from UTC to location-local with an API-reported abbreviation (REQ-014); JSON declared metric-only and the `temperature_f`/`feels_like_f` twins dropped from the schema (REQ-009); omitted readings defined as `null`/`n/a` rather than `0` (REQ-013); `admin1` added to `Location` and the header (REQ-015); error output now carries its cause (ERR-005). PAT-001/PAT-002 rewritten — the formatter trait and factory were removed in favour of free functions and base-URL injection. Test strategy corrected to the frameworks actually in use, with unmeasured coverage recorded as a known gap. CI expanded from `ubuntu-latest` to a Linux/macOS/Windows matrix, so NFR-003 and PLT-002 are now verified rather than asserted. |
 
 ## 12. Related Specifications / Further Reading
 
