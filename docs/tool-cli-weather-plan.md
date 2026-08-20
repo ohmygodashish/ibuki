@@ -101,7 +101,7 @@ Prefer `rustls-tls` over native-tls to keep cross-platform builds simple and bin
 
 **Goal:** Resolve city names to coordinates; shared types ready.
 
-- [ ] Define `Location { name, country, latitude, longitude }`
+- [ ] Define `Location { name, admin1, country, latitude, longitude }`
 - [ ] Define `AppError` variants: `CityNotFound`, `Network`, `Timeout`, `Api`, `EmptyData`, `InvalidInput`
 - [ ] Map errors to user-facing messages (ERR-001–004, edge-case table in spec §9)
 - [ ] Implement `GeocodingClient` trait + Open-Meteo impl

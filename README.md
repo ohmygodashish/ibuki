@@ -85,7 +85,9 @@ ibuki current "San Francisco"
 └────────────────────────────────────────────┘
 ```
 
-Timestamps are local to the queried location — the trailing label is the timezone
+Ambiguous city names resolve to one arbitrary match, so the header names the region
+when it differs from the city — "Portland, Oregon, United States". Timestamps are
+local to the queried location — the trailing label is the timezone
 Open-Meteo reports for it. Readings the API omits show as `n/a` rather than `0`.
 
 Use `--json` for scripts and tooling: it is a stable metric schema (°C, mm, km/h),

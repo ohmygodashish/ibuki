@@ -124,6 +124,7 @@ OPTIONS:
 {
   "location": {
     "name": "Tokyo",
+    "admin1": "Tokyo",
     "country": "Japan",
     "latitude": 35.6762,
     "longitude": 139.6503
@@ -148,6 +149,7 @@ OPTIONS:
 {
   "location": {
     "name": "Tokyo",
+    "admin1": "Tokyo",
     "country": "Japan",
     "latitude": 35.6762,
     "longitude": 139.6503
@@ -172,6 +174,7 @@ OPTIONS:
 {
   "location": {
     "name": "Tokyo",
+    "admin1": "Tokyo",
     "country": "Japan",
     "latitude": 35.6762,
     "longitude": 139.6503
@@ -193,6 +196,7 @@ OPTIONS:
 {
   "location": {
     "name": "Tokyo",
+    "admin1": "Tokyo",
     "country": "Japan",
     "latitude": 35.6762,
     "longitude": 139.6503
@@ -215,7 +219,7 @@ OPTIONS:
 **Geocoding API**:
 - Endpoint: `https://geocoding-api.open-meteo.com/v1/search`
 - Query: `name={city}&count=1&language=en&format=json`
-- Response: `results[0].latitude`, `results[0].longitude`, `results[0].name`, `results[0].country`
+- Response: `results[0].latitude`, `results[0].longitude`, `results[0].name`, `results[0].admin1`, `results[0].country`
 
 **Weather Forecast API**:
 - Endpoint: `https://api.open-meteo.com/v1/forecast`
