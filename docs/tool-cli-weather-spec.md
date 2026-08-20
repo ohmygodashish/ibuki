@@ -1,8 +1,8 @@
 ---
 title: ibuki CLI Weather Tool Specification
-version: 1.0
+version: 1.1
 date_created: 2026-06-08
-last_updated: 2026-06-08
+last_updated: 2026-08-20
 owner: ibuki
 tags: [tool, cli, rust, weather]
 ---
@@ -33,12 +33,14 @@ This specification defines the requirements, constraints, and interfaces for **i
 
 | Term | Definition |
 |------|------------|
+| **admin1** | First-level administrative region (e.g. "Oregon"), used to disambiguate same-named cities |
 | **AQI** | Air Quality Index — a numeric scale (0-500) indicating air pollution level |
 | **API** | Application Programming Interface |
 | **CLI** | Command-Line Interface |
 | **Geocoding** | Converting a city name to geographic coordinates (latitude, longitude) |
 | **Open-Meteo** | Free, open-source weather API service requiring no API key |
 | **Radar Metrics** | Precipitation data including rain intensity, snowfall, and weather conditions |
+| **Timezone abbreviation** | The label Open-Meteo reports for a location's local time (e.g. `GMT+9`) |
 | **UTC** | Coordinated Universal Time |
 | **WMO Code** | World Meteorological Organization weather condition code |
 
@@ -51,13 +53,16 @@ This specification defines the requirements, constraints, and interfaces for **i
 - **REQ-003**: The tool SHALL provide a `radar` subcommand to display precipitation and radar-related metrics
 - **REQ-004**: The tool SHALL provide an `air-quality` subcommand to display current air quality data
 - **REQ-005**: The tool SHALL accept a city name as a positional argument for all subcommands
-- **REQ-006**: The tool SHALL support a `--json` flag to output machine-readable JSON instead of formatted terminal output
+- **REQ-006**: The tool SHALL support a global `--json` flag to output machine-readable JSON instead of formatted terminal output
 - **REQ-007**: The tool SHALL resolve city names to coordinates using the Open-Meteo Geocoding API
 - **REQ-008**: The tool SHALL display temperature in Celsius by default
-- **REQ-009**: The tool SHALL support a `--fahrenheit` flag to display temperature in Fahrenheit
+- **REQ-009**: The tool SHALL support a global `--fahrenheit` flag that converts temperature for human-readable output only; JSON output SHALL remain metric regardless of the flag
 - **REQ-010**: The tool SHALL display colored, formatted output in the terminal when stdout is a TTY
 - **REQ-011**: The tool SHALL disable colors when stdout is not a TTY or when `NO_COLOR` environment variable is set
 - **REQ-012**: The `forecast` subcommand SHALL support a `--days <N>` option to specify forecast duration (1-16 days)
+- **REQ-013**: The tool SHALL represent a reading the API omits as `null` in JSON and `n/a` in human-readable output, never as `0`
+- **REQ-014**: The tool SHALL request `timezone=auto` and display timestamps in the location's local time, labelled with the timezone abbreviation the API reports; it SHALL NOT label local times as UTC
+- **REQ-015**: The tool SHALL display the resolved region (`admin1`) alongside the city when it differs from the city name, so an ambiguous match is visible
 
 ### Non-Functional Requirements
 
@@ -72,6 +77,7 @@ This specification defines the requirements, constraints, and interfaces for **i
 - **ERR-002**: The tool SHALL display a user-friendly error message when network requests fail
 - **ERR-003**: The tool SHALL display a user-friendly error message when API rate limits are exceeded
 - **ERR-004**: The tool SHALL NOT panic on any input; all errors SHALL be handled gracefully
+- **ERR-005**: The tool SHALL append the underlying cause to the user-friendly message, so a failure reports why it failed
 
 ### Constraints
 
@@ -89,9 +95,10 @@ This specification defines the requirements, constraints, and interfaces for **i
 
 ### Patterns
 
-- **PAT-001**: Use the Repository pattern for API client abstraction
-- **PAT-002**: Use trait-based dependency injection for testability
-- **PAT-003**: Separate data fetching, transformation, and presentation layers
+- **PAT-001**: Give each API a plain client struct (`GeocodingClient`, `WeatherClient`, `AirQualityClient`) sharing one `reqwest` client; no trait abstraction over a single implementation
+- **PAT-002**: Make clients testable by overriding their base URL — via `with_base_url` in-process, or the `IBUKI_GEOCODING_URL` / `IBUKI_FORECAST_URL` / `IBUKI_AIR_QUALITY_URL` environment variables for end-to-end tests
+- **PAT-003**: Separate data fetching (`geocoding`, `weather`, `air_quality`), domain models (`models`), and presentation (`format`) layers
+- **PAT-004**: Render human-readable output as plain text first, measure width, then apply color — never measure a string that already contains escape codes
 
 ## 4. Interfaces & Data Contracts
 
@@ -110,14 +117,19 @@ ARGUMENTS:
   <CITY>        City name (e.g., "Tokyo", "New York", "London")
 
 OPTIONS:
-  --json        Output in JSON format
-  --fahrenheit  Display temperature in Fahrenheit
+  --json        Output in JSON format, always metric (global)
+  --fahrenheit  Display temperature in Fahrenheit, human output only (global)
   --days <N>    Number of forecast days (1-16, default: 7, forecast only)
   -h, --help    Print help information
   -V, --version Print version information
 ```
 
 ### JSON Output Schemas
+
+The schema is metric-only and identical for every subcommand; `--fahrenheit` does not
+change it. Any reading the API omits is serialized as `null`. Timestamps are local to
+the queried location and carry no `Z` suffix; `timezone` names the offset the API
+reported, and is `null` when the API omits it.
 
 **current**:
 ```json
@@ -131,15 +143,14 @@ OPTIONS:
   },
   "current": {
     "temperature_c": 22.5,
-    "temperature_f": 72.5,
     "feels_like_c": 23.1,
-    "feels_like_f": 73.6,
     "humidity_percent": 65,
     "wind_speed_kmh": 12.3,
-    "wind_direction_deg": 180,
+    "wind_direction_deg": 180.0,
     "weather_code": 1,
     "weather_description": "Mainly clear",
-    "timestamp": "2026-06-08T14:30:00Z"
+    "timestamp": "2026-06-08T14:30",
+    "timezone": "GMT+9"
   }
 }
 ```
@@ -209,7 +220,8 @@ OPTIONS:
     "ozone_ug_m3": 68.0,
     "nitrogen_dioxide_ug_m3": 18.5,
     "carbon_monoxide_ug_m3": 250.0,
-    "timestamp": "2026-06-08T14:30:00Z"
+    "timestamp": "2026-06-08T14:30",
+    "timezone": "GMT+9"
   }
 }
 ```
@@ -238,9 +250,13 @@ OPTIONS:
 - **AC-005**: Given any subcommand, When `--json` flag is provided, Then output is valid JSON matching the defined schema
 - **AC-006**: Given an invalid city name, When any subcommand is executed, Then a clear error message is displayed and exit code is 1
 - **AC-007**: Given network failure, When any subcommand is executed, Then a clear error message is displayed and exit code is 1
-- **AC-008**: Given `--fahrenheit` flag, When temperature is displayed, Then values are in Fahrenheit
+- **AC-008**: Given `--fahrenheit` flag, When human-readable temperature is displayed, Then values are in Fahrenheit; When `--json` is also given, Then values remain Celsius
 - **AC-009**: Given stdout is not a TTY, When output is displayed, Then ANSI color codes are omitted
-- **AC-010**: Given `--days 20` (out of range), When `forecast` is executed, Then an error message indicates valid range is 1-16
+- **AC-010**: Given `--days 20` (out of range), When `forecast` is executed, Then an error message indicates valid range is `1..=16`
+- **AC-011**: Given the API omits a reading, When output is displayed, Then it shows `n/a` in human output and `null` in JSON, never `0`
+- **AC-012**: Given a location outside UTC, When a timestamp is displayed, Then it is local time labelled with the API's timezone abbreviation
+- **AC-013**: Given a city whose region differs from its name (e.g. Portland), When any subcommand is executed, Then the header reads "Portland, Oregon, United States"
+- **AC-014**: Given a request that fails, When the error is printed, Then the message includes the underlying cause
 
 ## 6. Test Automation Strategy
 
@@ -251,24 +267,30 @@ OPTIONS:
 
 - **Frameworks**:
   - `cargo test` (built-in Rust test framework)
-  - `mockito` or `wiremock` for HTTP mocking
-  - `assert_cmd` for CLI integration testing
-  - `insta` for snapshot testing of terminal output
+  - `mockito` for HTTP mocking
+  - `assert_cmd` and `predicates` for CLI integration testing
 
 - **Test Data Management**:
   - Store sample API responses as JSON fixtures in `tests/fixtures/`
   - Use fixture files for consistent test data across test runs
+  - Tests SHALL NOT reach the network; redirect every client at a mock server via
+    `with_base_url` or the `IBUKI_*_URL` environment variables
+  - Fixtures carry `"timezone_abbreviation": "JST"`, while live Open-Meteo returns
+    `GMT+9`; assertions on a specific abbreviation MUST use the fixtures
 
 - **CI/CD Integration**:
   - Run `cargo test` on every PR via GitHub Actions
-  - Run `cargo clippy` and `cargo fmt --check` for code quality
+  - Run `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` for code quality
+  - Enforce the NFR-002 binary size budget on the release build
+  - **Known gap**: CI currently runs on `ubuntu-latest` only, so NFR-003 and PLT-002
+    (macOS, Windows) are stated but unverified
 
 - **Coverage Requirements**:
   - Minimum 80% code coverage for core logic
   - 100% coverage for error handling paths
+  - **Known gap**: no coverage tooling is wired into CI; this is currently unmeasured
 
 - **Performance Testing**:
-  - Benchmark API response parsing with `criterion`
   - Ensure cold-start to output is under 2 seconds
 
 ## 7. Rationale & Context
@@ -343,46 +365,61 @@ ibuki forecast --help
 ### Example Terminal Output (current)
 
 ```
-┌─────────────────────────────────────────┐
-│  Tokyo, Japan                           │
-│  Current Weather                        │
-├─────────────────────────────────────────┤
-│  Temperature:  22.5°C (feels 23.1°C)    │
-│  Conditions:   Mainly clear             │
-│  Humidity:     65%                      │
-│  Wind:         12.3 km/h (S)            │
-│  Updated:      2026-06-08 14:30 UTC     │
-└─────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│  Tokyo, Japan                              │
+│  Current Weather                           │
+│  ────────────────────────────────────────  │
+│  Temperature:  22.5°C (feels 23.1°C)       │
+│  Conditions:   Mainly clear                │
+│  Humidity:     65%                         │
+│  Wind:         12.3 km/h (S)               │
+│  Updated:      2026-06-08 14:30 GMT+9      │
+└────────────────────────────────────────────┘
 ```
+
+Tokyo's `admin1` is also "Tokyo", so the region is suppressed. A city whose region
+differs shows all three parts: `Portland, Oregon, United States`.
 
 ### Edge Cases
 
 | Scenario | Expected Behavior |
 |----------|-------------------|
 | City not found | Display "Error: City 'Xyz' not found. Please check the spelling." |
-| Multiple cities with same name | Use the first result from geocoding (highest population) |
+| Multiple cities with same name | Use the single result geocoding returns for `count=1`, and show its `admin1` in the header so the pick is visible |
 | City name with spaces | Accept quoted strings: `ibuki current "New York"` |
 | Network timeout | Display "Error: Network request timed out. Please try again." |
 | API returns empty data | Display "Error: No weather data available for this location." |
-| Invalid UTF-8 in city name | Display "Error: Invalid city name encoding." |
-| `--days 0` or `--days 100` | Display "Error: Days must be between 1 and 16." |
+| Empty or whitespace-only city name | Display "Error: City '   ' not found. Please check the spelling." without issuing a request |
+| Invalid UTF-8 in city name | Rejected by `clap` during argument parsing before any request is made |
+| `--days 0` or `--days 100` | Display "error: invalid value '0' for '--days <DAYS>': 0 is not in 1..=16" |
+| Double-width (CJK) city name | Box borders may overhang; widths are counted in `char`s, not display columns |
 
 ## 10. Validation Criteria
 
 - [ ] All four subcommands (`current`, `forecast`, `radar`, `air-quality`) produce correct output
-- [ ] `--json` flag produces valid JSON matching defined schemas
-- [ ] `--fahrenheit` flag correctly converts temperatures
+- [ ] `--json` flag produces valid JSON matching defined schemas, in metric regardless of `--fahrenheit`
+- [ ] `--fahrenheit` flag correctly converts temperatures in human-readable output
+- [ ] Omitted readings render as `n/a` / `null`, never `0`
+- [ ] Timestamps are local and labelled with the API's timezone abbreviation
+- [ ] Errors report their underlying cause
 - [ ] `--days` flag works within valid range (1-16)
 - [ ] Invalid city names produce clear error messages
 - [ ] Network errors are handled gracefully
-- [ ] Binary compiles and runs on Linux, macOS, and Windows
+- [ ] Binary compiles and runs on Linux, macOS, and Windows (CI verifies Linux only)
 - [ ] `cargo test` passes with minimum 80% coverage
 - [ ] `cargo clippy` produces no warnings
 - [ ] `cargo fmt --check` passes
 - [ ] Binary size is under 5 MB
 - [ ] Cold-start to output is under 2 seconds
 
-## 11. Related Specifications / Further Reading
+## 11. Revision History
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-06-08 | Initial specification |
+| 1.1 | 2026-08-20 | Reconciled with the implementation. Timestamps corrected from UTC to location-local with an API-reported abbreviation (REQ-014); JSON declared metric-only and the `temperature_f`/`feels_like_f` twins dropped from the schema (REQ-009); omitted readings defined as `null`/`n/a` rather than `0` (REQ-013); `admin1` added to `Location` and the header (REQ-015); error output now carries its cause (ERR-005). PAT-001/PAT-002 rewritten — the formatter trait and factory were removed in favour of free functions and base-URL injection. Test strategy corrected to the frameworks actually in use, with the ubuntu-only CI and unmeasured coverage recorded as known gaps. |
+
+## 12. Related Specifications / Further Reading
 
 - [Open-Meteo API Documentation](https://open-meteo.com/en/docs)
 - [Open-Meteo Geocoding API](https://open-meteo.com/en/docs/geocoding-api)
