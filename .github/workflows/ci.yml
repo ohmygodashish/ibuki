@@ -3,7 +3,18 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'docs/**'
+      - 'LICENSE'
+  pull_request: 
+    branches: [ main ]  
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
+      - 'docs/**'
+      - 'LICENSE'
 
 env:
   CARGO_TERM_COLOR: always
@@ -49,3 +60,4 @@ jobs:
           size=$(stat -c%s target/release/ibuki)
           echo "Binary size: $size bytes"
           test "$size" -lt 5242880
+          
