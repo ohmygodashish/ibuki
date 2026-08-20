@@ -168,14 +168,22 @@ fn render(titles: &[String], rows: &[(&str, String)]) -> String {
     out
 }
 
+/// Joins the parts that carry information: a region equal to the city name adds
+/// nothing (Tokyo's admin1 is "Tokyo"), and a coordinate lookup has no country.
 fn header(location: &crate::models::Location) -> String {
-    match &location.admin1 {
-        // Tokyo's admin1 is "Tokyo"; repeating it adds nothing.
-        Some(region) if *region != location.name => {
-            format!("{}, {region}, {}", location.name, location.country)
-        }
-        _ => format!("{}, {}", location.name, location.country),
-    }
+    [
+        Some(location.name.as_str()),
+        location
+            .admin1
+            .as_deref()
+            .filter(|region| *region != location.name.as_str()),
+        Some(location.country.as_str()),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|part| !part.is_empty())
+    .collect::<Vec<_>>()
+    .join(", ")
 }
 
 fn dec(value: Option<f64>, unit: &str) -> String {
