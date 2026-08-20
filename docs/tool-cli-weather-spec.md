@@ -1,8 +1,8 @@
 ---
 title: ibuki CLI Weather Tool Specification
-version: 1.1
+version: 1.2
 date_created: 2026-06-08
-last_updated: 2026-08-20
+last_updated: 2026-08-21
 owner: ibuki
 tags: [tool, cli, rust, weather]
 ---
@@ -52,7 +52,7 @@ This specification defines the requirements, constraints, and interfaces for **i
 - **REQ-002**: The tool SHALL provide a `forecast` subcommand to display multi-day weather forecasts (default: 7 days)
 - **REQ-003**: The tool SHALL provide a `radar` subcommand to display precipitation and radar-related metrics
 - **REQ-004**: The tool SHALL provide an `air-quality` subcommand to display current air quality data
-- **REQ-005**: The tool SHALL accept a city name as a positional argument for all subcommands
+- **REQ-005**: The tool SHALL accept a city name as an optional positional argument for all subcommands
 - **REQ-006**: The tool SHALL support a global `--json` flag to output machine-readable JSON instead of formatted terminal output
 - **REQ-007**: The tool SHALL resolve city names to coordinates using the Open-Meteo Geocoding API
 - **REQ-008**: The tool SHALL display temperature in Celsius by default
@@ -63,6 +63,10 @@ This specification defines the requirements, constraints, and interfaces for **i
 - **REQ-013**: The tool SHALL represent a reading the API omits as `null` in JSON and `n/a` in human-readable output, never as `0`
 - **REQ-014**: The tool SHALL request `timezone=auto` and display timestamps in the location's local time, labelled with the timezone abbreviation the API reports; it SHALL NOT label local times as UTC
 - **REQ-015**: The tool SHALL display the resolved region (`admin1`) alongside the city when it differs from the city name, so an ambiguous match is visible
+- **REQ-016**: The tool SHALL support global `--lat` and `--lon` options that name a point directly and skip the geocoding lookup; each SHALL require the other, and out-of-range values SHALL be rejected
+- **REQ-017**: The tool SHALL read a default city from the `IBUKI_CITY` environment variable when the positional argument is omitted; an explicit argument SHALL take precedence
+- **REQ-018**: The tool SHALL resolve a location from exactly one source, in precedence order `--lat`/`--lon`, then positional city, then `IBUKI_CITY`; when none is supplied it SHALL fail with a message naming the alternatives
+- **REQ-019**: The tool SHOULD cache city-to-coordinate results locally to avoid repeating the geocoding request. The cache SHALL be best-effort: an unwritable, missing, or malformed cache SHALL degrade to a normal lookup, never an error
 
 ### Non-Functional Requirements
 
@@ -84,7 +88,12 @@ This specification defines the requirements, constraints, and interfaces for **i
 - **CON-001**: The tool MUST use Open-Meteo APIs (no API key required)
 - **CON-002**: The tool MUST be implemented in Rust
 - **CON-003**: The tool MUST NOT require user authentication or API key configuration
-- **CON-004**: The tool MUST NOT store user data or track usage
+- **CON-004**: The tool MUST NOT transmit user data or track usage. The sole permitted local
+  artifact is the geocoding cache (REQ-019): city names the user queried, mapped to public
+  coordinates, written under the user's own cache directory and never transmitted anywhere.
+  It contains no identity, credentials, or timestamps, and may be deleted at any time
+- **CON-005**: The tool MUST NOT persist results obtained from a redirected endpoint
+  (`IBUKI_GEOCODING_URL`), so test and mock coordinates cannot enter the user's cache
 
 ### Guidelines
 
@@ -105,7 +114,7 @@ This specification defines the requirements, constraints, and interfaces for **i
 ### CLI Interface
 
 ```
-ibuki <SUBCOMMAND> <CITY> [OPTIONS]
+ibuki <SUBCOMMAND> [CITY] [OPTIONS]
 
 SUBCOMMANDS:
   current       Display current weather conditions
@@ -114,15 +123,30 @@ SUBCOMMANDS:
   air-quality   Display air quality information
 
 ARGUMENTS:
-  <CITY>        City name (e.g., "Tokyo", "New York", "London")
+  [CITY]        City name (e.g., "Tokyo", "New York", "London").
+                Optional; falls back to $IBUKI_CITY, or omit entirely when
+                using --lat/--lon
 
 OPTIONS:
   --json        Output in JSON format, always metric (global)
   --fahrenheit  Display temperature in Fahrenheit, human output only (global)
+  --lat <LAT>   Latitude (-90..=90), skips geocoding; requires --lon (global)
+  --lon <LON>   Longitude (-180..=180), skips geocoding; requires --lat (global)
   --days <N>    Number of forecast days (1-16, default: 7, forecast only)
   -h, --help    Print help information
   -V, --version Print version information
+
+ENVIRONMENT:
+  IBUKI_CITY    Default city when no positional argument is given
+  NO_COLOR      Disable colored output
 ```
+
+### Local Cache
+
+City-to-coordinate results are cached at `$XDG_CACHE_HOME/ibuki/geocoding.json`, falling
+back to `%LOCALAPPDATA%\ibuki\geocoding.json` on Windows and `~/.cache/ibuki/geocoding.json`
+otherwise. Keys are the trimmed, lowercased city name; values are `Location` objects.
+The file is safe to delete, and a corrupt one is treated as empty.
 
 ### JSON Output Schemas
 
@@ -257,6 +281,13 @@ reported, and is `null` when the API omits it.
 - **AC-012**: Given a location outside UTC, When a timestamp is displayed, Then it is local time labelled with the API's timezone abbreviation
 - **AC-013**: Given a city whose region differs from its name (e.g. Portland), When any subcommand is executed, Then the header reads "Portland, Oregon, United States"
 - **AC-014**: Given a request that fails, When the error is printed, Then the message includes the underlying cause
+- **AC-015**: Given `--lat 35.6895 --lon 139.6917`, When any subcommand is executed, Then weather is returned with no geocoding request, headed by the coordinates
+- **AC-016**: Given `--lat` without `--lon`, When any subcommand is executed, Then argument parsing fails naming the missing option
+- **AC-017**: Given `--lat 91`, When any subcommand is executed, Then the command fails stating the valid range
+- **AC-018**: Given `IBUKI_CITY=Tokyo` and no positional argument, When `ibuki current` is executed, Then Tokyo's weather is displayed
+- **AC-019**: Given no city and no coordinates, When any subcommand is executed, Then the error names the positional argument, `--lat`/`--lon`, and `IBUKI_CITY`
+- **AC-020**: Given a city resolved once, When it is requested again, Then the coordinates come from the cache and no geocoding request is made
+- **AC-021**: Given a malformed cache file, When a city is requested, Then the lookup succeeds over the network and the cache is rewritten
 
 ## 6. Test Automation Strategy
 
@@ -308,10 +339,19 @@ reported, and is `null` when the API omits it.
 - Strong type safety and error handling
 - Cross-platform compilation support
 
-**Why city name only (no coordinates/IP)?**
-- Simplest user experience for the primary use case
+**Why city name first, with coordinates as an escape hatch?**
+- A city name is the simplest user experience for the primary use case
 - Geocoding API handles name resolution transparently
-- Future versions may add coordinate and IP-based location
+- `--lat`/`--lon` serve users who know the exact point, want a location geocoding
+  cannot name, or want to skip the extra round trip entirely
+- IP-based location remains out of scope: it would require a third-party service and
+  contradicts CON-004
+
+**Why cache geocoding but not weather?**
+- A city's coordinates do not change, so the cache needs no invalidation strategy
+- Weather does change, and caching it would serve stale readings
+- The cache is best-effort by design: correctness never depends on it, so a read-only
+  or full disk degrades latency rather than breaking the tool
 
 **Why Celsius default?**
 - Metric is the international standard
@@ -394,6 +434,11 @@ differs shows all three parts: `Portland, Oregon, United States`.
 | Invalid UTF-8 in city name | Rejected by `clap` during argument parsing before any request is made |
 | `--days 0` or `--days 100` | Display "error: invalid value '0' for '--days <DAYS>': 0 is not in 1..=16" |
 | Double-width (CJK) city name | Box borders may overhang; widths are counted in `char`s, not display columns |
+| `--lat` given without `--lon` | `clap` rejects the invocation, naming the missing option |
+| Latitude outside -90..=90 | Display "Error: Latitude must be between -90 and 90." |
+| Both a city and `--lat`/`--lon` given | Coordinates win; no geocoding request is made |
+| Cache file missing, unreadable, or corrupt | Treated as empty; the lookup proceeds over the network |
+| Cache directory not writable | The lookup still succeeds; only the round-trip saving is lost |
 
 ## 10. Validation Criteria
 
@@ -403,6 +448,9 @@ differs shows all three parts: `Portland, Oregon, United States`.
 - [ ] Omitted readings render as `n/a` / `null`, never `0`
 - [ ] Timestamps are local and labelled with the API's timezone abbreviation
 - [ ] Errors report their underlying cause
+- [ ] `--lat`/`--lon` skip geocoding, require each other, and reject out-of-range values
+- [ ] `IBUKI_CITY` supplies a default city, overridden by an explicit argument
+- [ ] A repeated city lookup is served from the cache, and a corrupt cache self-heals
 - [ ] `--days` flag works within valid range (1-16)
 - [ ] Invalid city names produce clear error messages
 - [ ] Network errors are handled gracefully
@@ -418,6 +466,7 @@ differs shows all three parts: `Portland, Oregon, United States`.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-06-08 | Initial specification |
+| 1.2 | 2026-08-21 | Added `--lat`/`--lon` coordinate input and the `IBUKI_CITY` default city (REQ-016 to REQ-018), making the positional city optional (REQ-005). Added a best-effort local geocoding cache (REQ-019). CON-004 amended: the cache is the one permitted local artifact, and CON-005 added so mock endpoints cannot write to it. |
 | 1.1 | 2026-08-20 | Reconciled with the implementation. Timestamps corrected from UTC to location-local with an API-reported abbreviation (REQ-014); JSON declared metric-only and the `temperature_f`/`feels_like_f` twins dropped from the schema (REQ-009); omitted readings defined as `null`/`n/a` rather than `0` (REQ-013); `admin1` added to `Location` and the header (REQ-015); error output now carries its cause (ERR-005). PAT-001/PAT-002 rewritten — the formatter trait and factory were removed in favour of free functions and base-URL injection. Test strategy corrected to the frameworks actually in use, with unmeasured coverage recorded as a known gap. CI expanded from `ubuntu-latest` to a Linux/macOS/Windows matrix, so NFR-003 and PLT-002 are now verified rather than asserted. |
 
 ## 12. Related Specifications / Further Reading
