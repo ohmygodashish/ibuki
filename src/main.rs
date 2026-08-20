@@ -8,7 +8,9 @@ use ibuki::air_quality::AirQualityClient;
 use ibuki::cli::{Cli, Command};
 use ibuki::format;
 use ibuki::geocoding::GeocodingClient;
-use ibuki::models::{AirQualityResponse, CurrentResponse, ForecastResponse, RadarResponse};
+use ibuki::models::{
+    AirQualityResponse, CurrentResponse, ForecastResponse, Location, RadarResponse,
+};
 use ibuki::weather::WeatherClient;
 
 fn main() -> ExitCode {
@@ -31,7 +33,7 @@ fn run() -> anyhow::Result<()> {
     let weather = WeatherClient::new(http.clone());
     let air_quality = AirQualityClient::new(http);
 
-    let location = geocoding.resolve(cli.command.city())?;
+    let location = resolve_location(&cli, &geocoding)?;
     let json = cli.json;
     let fahrenheit = cli.fahrenheit;
 
@@ -80,6 +82,35 @@ fn run() -> anyhow::Result<()> {
 
     println!("{output}");
     Ok(())
+}
+
+/// `--lat`/`--lon` name a point directly; otherwise the city (or `IBUKI_CITY`)
+/// is geocoded. A coordinate lookup has no name or country, so it labels itself.
+fn resolve_location(cli: &Cli, geocoding: &GeocodingClient) -> anyhow::Result<Location> {
+    let (Some(lat), Some(lon)) = (cli.lat, cli.lon) else {
+        let city = cli
+            .command
+            .city()
+            .context("Error: Provide a city name, or --lat and --lon, or set IBUKI_CITY.")?;
+        return Ok(geocoding.resolve(city)?);
+    };
+
+    anyhow::ensure!(
+        (-90.0..=90.0).contains(&lat),
+        "Error: Latitude must be between -90 and 90."
+    );
+    anyhow::ensure!(
+        (-180.0..=180.0).contains(&lon),
+        "Error: Longitude must be between -180 and 180."
+    );
+
+    Ok(Location {
+        name: format!("{lat:.4}, {lon:.4}"),
+        admin1: None,
+        country: String::new(),
+        latitude: lat,
+        longitude: lon,
+    })
 }
 
 fn to_json<T: serde::Serialize>(value: &T) -> anyhow::Result<String> {
