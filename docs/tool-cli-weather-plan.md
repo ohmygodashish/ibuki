@@ -1,257 +1,158 @@
 ---
-title: ibuki Implementation Plan
-version: 1.0
+title: ibuki Architecture & Backlog
+version: 2.0
 date_created: 2026-07-14
-last_updated: 2026-07-14
+last_updated: 2026-08-21
 owner: ibuki
-tags: [implementation, plan, rust, cli]
+tags: [architecture, backlog, rust, cli]
 related: tool-cli-weather-spec.md
 ---
 
-# Implementation Plan
+# Architecture & Backlog
 
-Phased plan to implement **ibuki** against `docs/tool-cli-weather-spec.md`. Goal: ship a working CLI with all four subcommands, JSON/human output, solid error handling, and tests.
+How **ibuki** is built today, and what is left to do. Requirements live in
+[`tool-cli-weather-spec.md`](./tool-cli-weather-spec.md); this document describes the
+implementation that satisfies them.
+
+> Superseded the original phased implementation plan (v1.0, 2026-07-14). Every phase in
+> that plan shipped; it was rewritten rather than ticked off because several of its
+> instructions had become actively wrong — see [Decisions that reversed the plan](#decisions-that-reversed-the-original-plan).
 
 ## Current State
 
 | Item | Status |
 |------|--------|
-| Repo / Cargo package | Exists (`edition = "2024"`) |
-| Spec | Complete (`docs/tool-cli-weather-spec.md`) |
-| Application code | Stub only (`Hello, world!`) |
-| Dependencies | None |
-| Tests / CI | None |
+| Application | Complete — four subcommands, human and JSON output |
+| Source | ~1,120 lines across 13 files in `src/` |
+| Tests | 42 (`cargo test`): 3 unit, 13 API client, 14 CLI, 12 formatting |
+| CI | GitHub Actions, Linux/macOS/Windows matrix, clippy + fmt + size gate |
+| Release binary | ~3.5 MB against the 5 MB budget (NFR-002) |
+| Dependencies | 7 production, 4 dev — no API key, no config file |
 
-## Target Architecture
+## Architecture
 
 ```
 src/
-├── main.rs              # Entry: parse CLI, run command, exit codes
-├── cli.rs               # clap: subcommands, flags, validation
-├── error.rs             # AppError + thiserror / anyhow boundaries
+├── main.rs              # Composition root: parse, resolve location, fetch, format, exit
+├── lib.rs               # Module declarations
+├── cli.rs               # clap: subcommands, global flags, IBUKI_CITY
+├── error.rs             # AppError + shared map_reqwest_error / check_status
 ├── geocoding/
-│   └── mod.rs           # City → Location (Open-Meteo Geocoding)
+│   └── mod.rs           # City → Location, plus the on-disk coordinate cache
 ├── weather/
-│   ├── mod.rs           # Weather client trait + Open-Meteo impl
-│   ├── current.rs       # Current conditions fetch + model
-│   ├── forecast.rs      # Daily forecast fetch + model
-│   └── radar.rs         # Precipitation / radar metrics
+│   ├── mod.rs           # Shared forecast-API client and base URL
+│   ├── current.rs       # Current conditions
+│   ├── forecast.rs      # Daily forecast
+│   └── radar.rs         # Precipitation metrics
 ├── air_quality/
-│   └── mod.rs           # AQI client + model
+│   └── mod.rs           # AQI + pollutants
 ├── models/
-│   └── mod.rs           # Shared Location, WMO helpers, JSON DTOs
-├── format/
-│   ├── mod.rs           # Presenter trait
-│   ├── human.rs         # Colored TTY tables / boxes
-│   └── json.rs          # serde_json schemas from spec
-└── units.rs             # °C/°F conversion, wind direction labels
+│   └── mod.rs           # Location, per-command models, JSON response types
+├── format.rs            # All human-readable rendering (one file, four free functions)
+└── units.rs             # °C/°F, wind labels, WMO code → description
 tests/
-├── fixtures/            # Sample Open-Meteo JSON responses
-├── cli.rs               # assert_cmd E2E with mocked HTTP
-└── ...
+├── fixtures/            # Six Open-Meteo sample payloads
+├── api_clients.rs       # Clients against mockito
+├── cli.rs               # assert_cmd end-to-end with mocked HTTP
+└── format.rs            # Rendering and JSON schema
 ```
 
-**Patterns (from spec):**
-- Repository trait for HTTP clients (mockable)
-- Separate fetch → transform → present
-- No panics on user input; all errors mapped to exit code 1 + message
+### Request flow
+
+```
+Cli::parse
+  └─ resolve_location            --lat/--lon → Location directly (no network)
+       └─ GeocodingClient        else: cache hit → Location
+            └─ Open-Meteo        else: HTTP, then write cache
+  └─ WeatherClient | AirQualityClient
+  └─ format::* (human) | serde_json::to_string_pretty (--json)
+  └─ stdout, exit 0 / 1
+```
+
+### Patterns in force
+
+- **Plain structs, no traits.** Each API gets a client struct sharing one `reqwest`
+  client. There is no repository trait and no formatter trait — a trait with a single
+  implementation was removed as unearned indirection.
+- **Base-URL injection is the test seam.** `with_base_url` in-process, or
+  `IBUKI_GEOCODING_URL` / `IBUKI_FORECAST_URL` / `IBUKI_AIR_QUALITY_URL` for end-to-end
+  tests. No test touches the network.
+- **Metric internally, converted at the edge.** Models store °C; `--fahrenheit` affects
+  human rendering only, so one JSON schema serves all four subcommands.
+- **A missing reading is `None`, never `0`** — `n/a` in human output, `null` in JSON.
+- **Measure, then colourise.** `format.rs` lays out every line as plain text, measures
+  width, pads, and applies colour last, so no width calculation ever sees an escape code.
 
 ## Dependencies
 
 | Crate | Role |
 |-------|------|
-| `clap` (derive) | CLI parsing, help, version |
-| `reqwest` (blocking, json, rustls-tls) | HTTP client (sync CLI is fine for v1) |
-| `serde` / `serde_json` | Deserialize APIs, serialize `--json` |
-| `thiserror` | Typed domain errors |
+| `clap` (derive, env) | CLI parsing, help, version, `IBUKI_CITY` |
+| `reqwest` (blocking, json, rustls-tls) | HTTP client |
+| `serde` / `serde_json` | Deserialize APIs, serialize `--json`, the geocoding cache |
+| `thiserror` | Typed domain errors (`AppError`) |
 | `anyhow` | Top-level error reporting in `main` |
-| `owo-colors` or `colored` | TTY colors (respect `NO_COLOR`) |
-| `is-terminal` | Detect stdout TTY for color |
+| `owo-colors` | TTY colours |
 
-**Dev / test:**
-| Crate | Role |
-|-------|------|
-| `assert_cmd` | CLI integration tests |
-| `predicates` | Output assertions |
-| `mockito` or `wiremock` | HTTP mocking |
-| `insta` | Snapshot human output (optional phase 5) |
+TTY detection uses `std::io::IsTerminal` from the standard library, not a crate.
+`rustls-tls` is preferred over native-tls for cross-platform builds and binary size
+(NFR-002); it resolves to `ring`, which needs no NASM on Windows.
 
-Prefer `rustls-tls` over native-tls to keep cross-platform builds simple and binary size down (NFR-002).
+**Dev:** `assert_cmd` (CLI execution), `predicates` (output assertions),
+`mockito` (HTTP mocking), `serde_json` (schema assertions).
 
-## Phases
+## Decisions that reversed the original plan
 
-### Phase 0 — Project scaffolding
+| Original plan said | What shipped, and why |
+|---|---|
+| Repository trait for HTTP clients; presenter trait in `format/` | Both deleted. One implementation per trait is indirection with no payoff; `src/format/{mod,human,json}.rs` collapsed into a single `src/format.rs` |
+| "Always include both `temperature_c` and `temperature_f`" in JSON | Reversed. JSON is metric-only (REQ-009); the `_f` twins were removed so one schema covers every subcommand |
+| Timestamps labelled UTC | Wrong by up to a day. `timezone=auto` returns local time; output now carries the API's own abbreviation (REQ-014) |
+| Out of scope: coordinate location | Shipped as `--lat`/`--lon` (REQ-016) |
+| Out of scope: caching | Shipped as a best-effort geocoding cache (REQ-019) |
+| `is-terminal`, `insta`, `wiremock` crates | Not used. `std::io::IsTerminal`, plain assertions, and `mockito` respectively |
+| macOS/Windows CI "optional later" | Shipped as a three-OS matrix |
 
-**Goal:** Compilable skeleton with module layout and deps; no real API calls yet.
+## Backlog
 
-- [ ] Add production and dev dependencies to `Cargo.toml`
-- [ ] Create module tree (`cli`, `error`, `models`, `geocoding`, `weather`, `air_quality`, `format`, `units`)
-- [ ] Wire `main.rs` to parse CLI and print a placeholder per subcommand
-- [ ] Implement clap structure matching spec interface:
-  - Subcommands: `current`, `forecast`, `radar`, `air-quality`
-  - Positional `<CITY>`
-  - Flags: `--json`, `--fahrenheit`, `--days` (forecast only, 1–16)
-- [ ] Validate `--days` range in clap (`value_parser` 1..=16) → ERR for AC-010
+Nothing is in progress. Remaining items, roughly by value:
 
-**Exit criteria:** `cargo build` succeeds; `ibuki --help` and subcommand help render correctly.
+- [ ] **Coverage is unmeasured.** The spec asks for ≥80% on core logic and 100% on error
+      paths; no tooling is wired into CI to confirm either. `cargo-llvm-cov` is the
+      usual answer.
+- [ ] **Double-width city names overhang the box.** Widths are counted in `char`s, so
+      `東京` renders a ragged right border. `unicode-width` is the upgrade path.
+      Marked `ponytail:` in `src/format.rs:119`.
+- [ ] **The geocoding cache grows without bound.** No eviction, by design — a city's
+      coordinates never change. Add eviction only if a real cache gets large.
+      Marked `ponytail:` in `src/geocoding/mod.rs:129`.
+- [ ] **Ambiguity is still resolved silently.** `count=1` means "Portland" picks one
+      match; `admin1` now makes the pick *visible* but offers no way to choose the other.
+      A `--region` filter or an interactive picker would close it.
+- [ ] **No release artifacts.** CI builds and tests but publishes nothing; there is no
+      tagged binary for the three platforms it verifies.
 
----
+### Explicitly out of scope
 
-### Phase 1 — Core models, errors, geocoding
+- IP-based location — needs a third-party service and conflicts with CON-004
+- Weather caching — the readings change; only coordinates are stable enough to cache
+- Config files or API keys — Open-Meteo needs neither (CON-001, CON-003)
+- Interactive TUI, async runtime — blocking HTTP is sufficient for a one-shot CLI
 
-**Goal:** Resolve city names to coordinates; shared types ready.
+## Verification
 
-- [ ] Define `Location { name, admin1, country, latitude, longitude }`
-- [ ] Define `AppError` variants: `CityNotFound`, `Network`, `Timeout`, `Api`, `EmptyData`, `InvalidInput`
-- [ ] Map errors to user-facing messages (ERR-001–004, edge-case table in spec §9)
-- [ ] Implement `GeocodingClient` trait + Open-Meteo impl
-  - Endpoint: `https://geocoding-api.open-meteo.com/v1/search?name=…&count=1&language=en&format=json`
-  - Use first result; empty results → `CityNotFound`
-- [ ] HTTP timeout 10s (NFR-001)
-- [ ] Unit tests: parse fixture responses; empty results; malformed JSON
+```bash
+cargo test                                   # 42 tests, no network access
+cargo clippy --all-targets -- -D warnings
+cargo fmt --check
+cargo build --release && stat -c%s target/release/ibuki   # < 5,242,880
 
-**Exit criteria:** Given a fixture or live call, city resolves to lat/lon; unknown city yields clear error + exit 1.
-
----
-
-### Phase 2 — Weather data (current, forecast, radar)
-
-**Goal:** Fetch and model all weather-related payloads from Forecast API.
-
-- [ ] Shared Open-Meteo forecast client (lat/lon + query params)
-- [ ] **Current** (`REQ-001`, `REQ-008`):
-  - Request current: temp, apparent temp, humidity, wind speed/dir, weather code, time
-  - Map WMO code → description string
-- [ ] **Forecast** (`REQ-002`, `REQ-012`):
-  - Daily: max/min temp, precip sum, precip probability, max wind, weather code
-  - Honor `--days` (1–16)
-- [ ] **Radar** (`REQ-003`):
-  - Current/hourly precip: last hour, next hour, rain/snow/showers intensity, weather code
-- [ ] Domain models matching JSON schemas in spec §4 (always store °C internally; convert at present)
-- [ ] Unit tests with fixtures under `tests/fixtures/`
-
-**Exit criteria:** Each weather path returns structured models from fixtures; live smoke test optional.
-
----
-
-### Phase 3 — Air quality
-
-**Goal:** Air quality subcommand complete.
-
-- [ ] Client for `https://air-quality-api.open-meteo.com/v1/air-quality`
-- [ ] Current: US AQI, EU AQI, PM2.5, PM10, O₃, NO₂, CO
-- [ ] Model matching `air-quality` JSON schema
-- [ ] Fixture + unit tests
-
-**Exit criteria:** `air-quality` path returns full pollutant set from fixture.
-
----
-
-### Phase 4 — Presentation layer
-
-**Goal:** Human and JSON output per acceptance criteria.
-
-- [ ] **JSON** (`REQ-006`, AC-005):
-  - Serialize models exactly to schemas in §4
-  - Always include both `temperature_c` and `temperature_f` in current/forecast JSON (spec examples include both)
-- [ ] **Human** (`REQ-010`, `REQ-011`, AC-009):
-  - Box/table style as in §9 example
-  - Colors when TTY and `NO_COLOR` unset
-  - No ANSI when non-TTY or `NO_COLOR` set
-  - Wind direction degrees → N/NE/E/… labels
-  - `--fahrenheit` switches displayed temps only (AC-008)
-- [ ] Consistent layout across all four subcommands (GUD-002, GUD-003)
-
-**Exit criteria:** Snapshot or manual check for human output; JSON validates against documented shapes.
-
----
-
-### Phase 5 — Wiring, polish, binary quality
-
-**Goal:** End-to-end CLI, robust errors, size/perf checks.
-
-- [ ] Orchestrate in `main` / command handlers:
-  1. Parse args
-  2. Geocode city
-  3. Call appropriate client
-  4. Format (human | json)
-  5. Exit 0 / 1 (NFR-004)
-- [ ] Ensure no panics on bad input (ERR-004)
-- [ ] Messages for: city not found, timeout, network, rate limit if detectable, empty API data, invalid days (clap)
-- [ ] Release profile in `Cargo.toml`: `lto`, `codegen-units = 1`, `strip = true` for size (NFR-002)
-- [ ] Manual smoke:
-  - `ibuki current Tokyo`
-  - `ibuki forecast London --days 3`
-  - `ibuki radar "New York"`
-  - `ibuki air-quality Paris --json`
-  - Invalid city / offline behavior
-
-**Exit criteria:** All AC-001–AC-010 pass manually; binary &lt; 5 MB release; cold path feels &lt; 2s on normal network.
-
----
-
-### Phase 6 — Tests and CI
-
-**Goal:** Automated confidence matching §6 of the spec.
-
-- [ ] Unit: units, WMO mapping, formatters, error messages
-- [ ] Integration: HTTP clients against mockito/wiremock + fixtures
-- [ ] CLI: `assert_cmd` for help, validation (`--days 20`), mocked happy paths
-- [ ] GitHub Actions workflow:
-  - `cargo fmt --check`
-  - `cargo clippy -- -D warnings`
-  - `cargo test`
-- [ ] Aim for ≥80% coverage on core logic; prioritize error paths
-
-**Exit criteria:** `cargo test`, clippy, fmt clean; CI green on PR.
-
----
-
-## Suggested Implementation Order (day-to-day)
-
-1. Phase 0 scaffolding + clap  
-2. Phase 1 geocoding + errors  
-3. Phase 2 `current` only → human + JSON (vertical slice)  
-4. Phase 2 `forecast` + `radar`  
-5. Phase 3 `air-quality`  
-6. Phase 4 polish formatting / colors  
-7. Phase 5 release profile + smoke  
-8. Phase 6 tests + CI  
-
-Ship a **vertical slice early** (`current` + geocode + human/JSON) so the loop (build → run → fix) is short before filling remaining subcommands.
-
-## Module Responsibilities (quick ref)
-
-| Module | Owns |
-|--------|------|
-| `cli` | Args only; no I/O |
-| `geocoding` | Name → `Location` |
-| `weather` | Forecast API access + domain models |
-| `air_quality` | Air quality API access + models |
-| `format` | stdout presentation only |
-| `error` | Error types + Display strings |
-| `units` | Conversions and pure helpers |
-| `main` | Composition root, process exit |
-
-## Out of Scope (v1)
-
-- Coordinate or IP-based location (spec §7: future)
-- Caching / offline mode
-- Config files or API keys
-- Interactive TUI
-- Async runtime (blocking HTTP is acceptable for v1 CLI)
-
-## Tracking Checklist (spec validation §10)
-
-- [ ] All four subcommands produce correct output  
-- [ ] `--json` matches schemas  
-- [ ] `--fahrenheit` converts correctly  
-- [ ] `--days` 1–16; out of range errors  
-- [ ] Invalid city / network errors graceful  
-- [ ] Linux build (macOS/Windows CI matrix optional later)  
-- [ ] Tests ≥80% core; clippy/fmt clean  
-- [ ] Release binary &lt; 5 MB  
-- [ ] Cold-start to output &lt; 2 s under normal network  
+# Manual smoke
+ibuki current Tokyo
+ibuki forecast London --days 5 --fahrenheit
+ibuki current --lat 45.5234 --lon -122.6762
+NO_COLOR=1 ibuki air-quality Paris
+```
 
 ## References
 
