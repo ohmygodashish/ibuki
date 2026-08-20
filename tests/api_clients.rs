@@ -196,3 +196,58 @@ fn air_quality_missing_pollutants_stay_none() {
     assert_eq!(aq.pm2_5_ug_m3, None);
     assert_eq!(aq.aqi_eu, None);
 }
+
+fn cache_file(name: &str) -> PathBuf {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(name);
+    let _ = fs::remove_file(&path);
+    path
+}
+
+/// A second client aimed at a dead port can only succeed from the cache.
+fn offline_client(cache: &PathBuf) -> GeocodingClient {
+    GeocodingClient::with_base_url(http(), "http://127.0.0.1:9/v1/search").with_cache(cache)
+}
+
+#[test]
+fn geocoding_second_lookup_is_served_from_cache() {
+    let mut server = mockito::Server::new();
+    let mock = mock_get(&mut server, "/v1/search", &fixture("geocoding_tokyo.json")).expect(1);
+    let cache = cache_file("cache_hit.json");
+
+    let online = GeocodingClient::with_base_url(http(), format!("{}/v1/search", server.url()))
+        .with_cache(&cache);
+    let first = online.resolve("Tokyo").unwrap();
+    let second = offline_client(&cache).resolve("Tokyo").unwrap();
+
+    assert_eq!(second.name, first.name);
+    assert_eq!(second.admin1, first.admin1);
+    assert!((second.latitude - first.latitude).abs() < 1e-9);
+    mock.assert(); // exactly one network call for two lookups
+}
+
+#[test]
+fn cache_lookup_ignores_case_and_surrounding_space() {
+    let mut server = mockito::Server::new();
+    let _mock = mock_get(&mut server, "/v1/search", &fixture("geocoding_tokyo.json"));
+    let cache = cache_file("cache_normalized.json");
+
+    GeocodingClient::with_base_url(http(), format!("{}/v1/search", server.url()))
+        .with_cache(&cache)
+        .resolve("Tokyo")
+        .unwrap();
+
+    let hit = offline_client(&cache).resolve("  tOkYo  ").unwrap();
+    assert_eq!(hit.name, "Tokyo");
+}
+
+#[test]
+fn corrupt_cache_falls_back_to_the_network() {
+    let mut server = mockito::Server::new();
+    let _mock = mock_get(&mut server, "/v1/search", &fixture("geocoding_tokyo.json"));
+    let cache = cache_file("cache_corrupt.json");
+    fs::write(&cache, "{ this is not json").unwrap();
+
+    let client = GeocodingClient::with_base_url(http(), format!("{}/v1/search", server.url()))
+        .with_cache(&cache);
+    assert_eq!(client.resolve("Tokyo").unwrap().name, "Tokyo");
+}

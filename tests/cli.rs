@@ -159,3 +159,80 @@ fn error_output_includes_underlying_cause() {
         .stderr(predicate::str::contains("Failed to parse API response"))
         .stderr(predicate::str::contains("error decoding response body"));
 }
+
+#[test]
+fn coordinates_skip_geocoding() {
+    let mut weather = mockito::Server::new();
+    let _weather_mock = mock_json(
+        &mut weather,
+        "/v1/forecast",
+        &fixture("current_weather.json"),
+    );
+
+    let mut cmd = Command::cargo_bin("ibuki").unwrap();
+    // Geocoding points at a dead port: success proves it was never called.
+    cmd.env("IBUKI_GEOCODING_URL", "http://127.0.0.1:9/v1/search")
+        .env(
+            "IBUKI_FORECAST_URL",
+            format!("{}/v1/forecast", weather.url()),
+        )
+        .env("NO_COLOR", "1")
+        .args(["current", "--lat", "35.6895", "--lon", "139.6917"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("35.6895, 139.6917"))
+        .stdout(predicate::str::contains("Mainly clear"));
+}
+
+#[test]
+fn lat_without_lon_is_rejected() {
+    let mut cmd = Command::cargo_bin("ibuki").unwrap();
+    cmd.args(["current", "--lat", "35.6895"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--lon"));
+}
+
+#[test]
+fn out_of_range_latitude_is_rejected() {
+    let mut cmd = Command::cargo_bin("ibuki").unwrap();
+    cmd.args(["current", "--lat", "91.0", "--lon", "0.0"])
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("-90"));
+}
+
+#[test]
+fn ibuki_city_supplies_the_default_city() {
+    let mut geo = mockito::Server::new();
+    let mut weather = mockito::Server::new();
+    let _geo_mock = mock_json(&mut geo, "/v1/search", &fixture("geocoding_tokyo.json"));
+    let _weather_mock = mock_json(
+        &mut weather,
+        "/v1/forecast",
+        &fixture("current_weather.json"),
+    );
+
+    let mut cmd = Command::cargo_bin("ibuki").unwrap();
+    cmd.env("IBUKI_GEOCODING_URL", format!("{}/v1/search", geo.url()))
+        .env(
+            "IBUKI_FORECAST_URL",
+            format!("{}/v1/forecast", weather.url()),
+        )
+        .env("IBUKI_CITY", "Tokyo")
+        .env("NO_COLOR", "1")
+        .arg("current")
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Tokyo, Japan"));
+}
+
+#[test]
+fn no_city_and_no_coordinates_is_a_clear_error() {
+    let mut cmd = Command::cargo_bin("ibuki").unwrap();
+    cmd.env_remove("IBUKI_CITY")
+        .arg("current")
+        .assert()
+        .failure()
+        .stderr(predicate::str::contains("--lat"));
+}
