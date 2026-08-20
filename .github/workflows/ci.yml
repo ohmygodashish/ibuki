@@ -8,8 +8,8 @@ on:
       - '.gitignore'
       - 'docs/**'
       - 'LICENSE'
-  pull_request: 
-    branches: [ main ]  
+  pull_request:
+    branches: [ main ]
     paths-ignore:
       - '**.md'
       - '.gitignore'
@@ -60,4 +60,3 @@ jobs:
           size=$(stat -c%s target/release/ibuki)
           echo "Binary size: $size bytes"
           test "$size" -lt 5242880
-          

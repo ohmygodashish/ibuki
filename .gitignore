@@ -25,5 +25,5 @@ target
 
 /target
 
-# Agent handoff notes
-/.agents/
+# Agent directory
+.agents/
